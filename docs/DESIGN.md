@@ -201,7 +201,7 @@ docs/                This file
 | 0. Setup ✅ | Repo, GitHub, design | Pushed |
 | 1. Data ✅ | Sleeper client, FantasyCalc provider, players.json script, fixtures from a real league | Real league rosters print with names and values |
 | 2. Engine v1 ✅ | Lineup, profiles, 1-for-1 and 2-for-1 generation, scoring, rationale; tests; CLI | Sensible ideas for both test leagues in the terminal |
-| 3. UI MVP | UC1–UC5 | Usable locally (`npm run dev`) |
+| 3. UI MVP ✅ | UC1–UC5, plus target and shop a player (UC6, UC7) and untouchables (part of UC8) | Usable locally (`npm run dev`) |
 | 3.5. More value sources | Sleeper projections → league-scored value; FantasyPros ECR via DynastyProcess; blended value plus buy-low/sell-high signal | Ideas cite disagreement between sources |
 | 4. Deploy | CDK stack + players Lambda; then the shampoe.com repo adds `trades` to `apps` plus `site/trades/` pages | Live at shampoe.com/trades/ |
 | 5. Iterate | UC6+ | — |
