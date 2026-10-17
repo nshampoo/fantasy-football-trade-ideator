@@ -1,4 +1,4 @@
-// Shared by scripts/players.mjs and the players Lambda.
+// Shared by the players Lambda (handler.mjs) and app/scripts/players.mjs.
 const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
 
 /** Sleeper's /players/nfl -> { id: { n, p, t, i? } } for fantasy-relevant positions. */
