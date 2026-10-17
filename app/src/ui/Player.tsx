@@ -44,7 +44,8 @@ export function PlayerRow({ player, slot, actions, dim }: { player: Player; slot
   );
 }
 
+/** Sleeper's image CDN refuses some referrers (e.g. *.cloudfront.net), so avatars send none. */
 export function Avatar({ avatar, name }: { avatar: string | null; name: string }) {
   const url = avatarUrl(avatar);
-  return url ? <img className="avatar" src={url} alt="" loading="lazy" /> : <span className="avatar blank">{name.slice(0, 1).toUpperCase()}</span>;
+  return url ? <img className="avatar" src={url} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="avatar blank">{name.slice(0, 1).toUpperCase()}</span>;
 }
