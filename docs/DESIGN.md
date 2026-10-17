@@ -1,181 +1,190 @@
-# Fantasy Football Trade Ideator — High-Level Design
+# Fantasy Football Trade Ideator — Design
 
 ## 1. Goal
 
-Given any Sleeper user (or league ID), analyze the league and suggest trades that
-help that user's team **and** are realistic for the other manager to accept.
+Given a Sleeper username, pick one of that user's leagues and a team, and suggest
+trades that help the team **and** that the other manager could plausibly accept.
 
-Final hosting target: a static site on **AWS S3 + CloudFront**, tied into the
-owner's personal website (subdomain or sub-path).
+Scope for now: **redraft leagues only.**
 
-## 2. Key constraints that shape the design
+Hosted at **shampoe.com/trades/**, using the same pattern as the other apps on
+shampoe.com (see §3).
 
-| Constraint | Implication |
-|---|---|
-| Sleeper API is public, read-only, no auth, CORS-friendly | The browser can call Sleeper directly — no backend needed for league data. |
-| Sleeper asks for < 1000 calls/min, and `/players/nfl` (~5 MB) at most once per day | Cache the player DB; don't fetch it per user per visit. |
-| Sleeper provides **no trade values** | Need an external value source (see §5). This is the most important design decision. |
-| Host on CloudFront | Favor a static SPA. Any server logic should be small, scheduled, and write static JSON. |
+## 2. Decisions
+
+| Decision | Choice | Why |
+|---|---|---|
+| League format | Redraft only | Current need; no draft picks or age modeling |
+| Player values | [FantasyCalc](https://fantasycalc.com) redraft values | Owner's preferred site. JSON API, CORS `*`, includes `sleeperId`, adjusts for team count and PPR |
+| Frontend | React + Vite + TypeScript, static build | Fits S3 + CloudFront; no server |
+| Trade engine | Pure TypeScript inside the app (`app/src/engine`), Vitest | Runs in the browser; easy to test and tune |
+| Hosting | Own S3 + CloudFront stack (CDK), proxied by shampoe.com at `/trades/app/` | Same as Epic Planner, Citi Bike, and Volo |
+| Deploy | `AWS_PROFILE=personal npm run deploy` from `infra/` | Same as the other repos |
 
 ## 3. Architecture
 
 ```
-                     ┌──────────────────────────────┐
-  Browser (SPA)      │  CloudFront  (yourdomain.com) │
-  React + TS  ◀──────┤   ├─ /           → S3: app    │
-      │              │   └─ /data/*     → S3: data   │
-      │              └──────────────▲───────────────┘
-      │                             │ writes daily
-      │                   ┌─────────┴──────────┐
-      │                   │ Scheduled job       │  (Lambda + EventBridge,
-      │                   │  - Sleeper players  │   or a GitHub Action cron)
-      │                   │  - player values    │
-      │                   └────────────────────┘
-      │
-      └──────▶ api.sleeper.app  (user, leagues, rosters, picks — live, per user)
+shampoe.com (personal-website repo)
+  ├─ /trades/        story page (how and why)
+  ├─ /trades/open/   site header + iframe of /trades/app/
+  └─ /trades/app/*  ──proxy, prefix stripped──▶  this repo's CloudFront ──▶ S3 (app build)
+                                                                 └─ /data/players.json
+Browser (the app)
+  ├─▶ api.sleeper.app        user, leagues, league settings, rosters, users   (live)
+  ├─▶ api.fantasycalc.com    redraft values for the league's format          (live)
+  └─▶ ./data/players.json    trimmed Sleeper player DB: id → name/pos/team
 ```
 
-- **Frontend:** React + Vite + TypeScript SPA. Calls Sleeper directly for
-  league-specific data.
-- **Trade engine:** a pure TypeScript module with no UI or network code. Runs in the
-  browser and gets heavy unit tests. If it later needs a server, it can move to a
-  Lambda unchanged.
-- **Data job:** runs once a day and publishes `players.json` (trimmed Sleeper player
-  DB) and `values.json` (player and pick values) to S3, served through CloudFront.
-  This keeps us within Sleeper's rate guidance and avoids CORS and key problems
-  with value providers.
-- **Infra as code:** AWS CDK (TypeScript). It covers the S3 buckets, the CloudFront
-  distribution, the ACM cert (us-east-1), Route 53 records, and the scheduled Lambda.
-- **CI/CD:** GitHub Actions authenticates to AWS with OIDC (no stored keys). Each
-  run builds, tests, syncs to S3, and invalidates CloudFront.
+- Both external APIs allow browser calls from any origin, so the app fetches
+  directly. Neither needs a key.
+- **players.json:** Sleeper's `/players/nfl` is about 5 MB, and Sleeper asks apps
+  to fetch it at most once a day. A small scheduled Lambda (daily, or weekly during
+  the season) trims it to the fields we use and writes it to the app bucket. Until
+  that exists, `npm run players` builds the same file locally.
+- **Relative paths everywhere:** the app is served under `/trades/app/` with the
+  prefix stripped, so the Vite `base` is `./`. The app has no client-side routes;
+  state lives in the query string.
+- **Cache-Control on every file:** shampoe.com's proxy only caches files that set
+  Cache-Control.
 
-## 4. Sleeper data we use
+## 4. Data sources
 
-| Endpoint | Purpose |
+### Sleeper
+| Endpoint | Use |
 |---|---|
-| `GET /v1/user/{username}` | Resolve username to user_id |
-| `GET /v1/user/{user_id}/leagues/nfl/{season}` | Pick a league |
-| `GET /v1/league/{league_id}` | Roster slots, scoring settings, league type (dynasty, keeper, redraft), superflex |
-| `GET /v1/league/{league_id}/rosters` | Who owns whom |
-| `GET /v1/league/{league_id}/users` | Team names and avatars |
-| `GET /v1/league/{league_id}/traded_picks` | Draft pick ownership (dynasty) |
-| `GET /v1/league/{league_id}/transactions/{week}` | Past trades: manager tendencies (later phase) |
-| `GET /v1/players/nfl` | Player DB (daily job only) |
-| `GET /v1/players/nfl/trending/add` | Buy-low / sell-high signals (later phase) |
+| `GET /v1/state/nfl` | Current season and week |
+| `GET /v1/user/{username}` | Username → user_id |
+| `GET /v1/user/{user_id}/leagues/nfl/{season}` | The user's leagues (keep `settings.type === 0`, which is redraft) |
+| `GET /v1/league/{id}` | `roster_positions`, `scoring_settings.rec`, `total_rosters` |
+| `GET /v1/league/{id}/rosters` | Players per team, record, points for |
+| `GET /v1/league/{id}/users` | Team names and avatars |
 
-## 5. Player value source (decision needed)
+### FantasyCalc
+`GET https://api.fantasycalc.com/values/current?isDynasty=false&numQbs={1|2}&numTeams={n}&ppr={0|0.5|1}`
 
-| Option | Pros | Cons |
-|---|---|---|
-| **FantasyCalc API** (recommended to start) | Free JSON, supports dynasty/redraft, 1QB/SF, PPR variants, includes picks | Third-party dependency; check terms before public launch |
-| KeepTradeCut | Popular, crowd-sourced | No official API; scraping raises ToS concerns |
-| Sleeper projections (undocumented endpoint) | Same source as the league | Undocumented and could break; weekly projections ≠ trade value |
-| Own model (projections + VORP) | Full control | Most work; best saved for a later phase |
+| Parameter | Taken from |
+|---|---|
+| `numQbs` | 2 if `roster_positions` has `SUPER_FLEX`, otherwise 1 |
+| `numTeams` | `total_rosters` |
+| `ppr` | `scoring_settings.rec` |
 
-Design the engine against a `ValueProvider` interface so the source can be swapped
-or blended.
+The response covers about 200 QB/RB/WR/TE players, each with `value`, `sleeperId`,
+and `maybeTier`. Players not listed (deep bench, K, DEF) count as replacement level
+(value 0). The provider sits behind a `ValueProvider` interface so it can be
+swapped or blended later.
 
-## 6. Trade engine (core logic)
+### Additional free value sources (planned, Phase 3.5)
 
-1. **Normalize the league.** Read the starting slots from `roster_positions`
-   (QB, RB, WR, TE, FLEX, SUPER_FLEX, and so on), the scoring format, and the
-   league type.
-2. **Value every asset.** Look up each player's value (and each pick's value in
-   dynasty leagues), adjusted for format.
-3. **Build team profiles.** For each roster:
-   - Fill the optimal starting lineup. Its value is the **starter value**.
-   - Bench players above replacement level count as **surplus**, by position.
-   - Weak starting slots, measured against the league median, count as
-     **needs**, by position.
-   - Team direction (contend or rebuild) comes from record, roster age, and
-     starter strength. This mainly matters in dynasty leagues.
-4. **Match partners.** Look for complementary profiles: my surplus covers their
-   need, and their surplus covers mine.
-5. **Generate candidates.** Try 1-for-1, 2-for-1, and 2-for-2 packages (plus picks
-   in dynasty) between matched teams. Prune hard to keep the search small.
-6. **Score each candidate.**
-   - `myGain` is the change in my starter value.
-   - `theirGain` is the change in their starter value. It is the acceptance proxy.
-   - `fairness` is the raw value difference, which must stay within a tolerance band.
-   - Penalties apply for roster-spot overflow and for hurting a team's direction
-     (for example, giving old players to a rebuilder).
-   - Rank by a weighted blend. Expose the weights as user "strategy" presets:
-     *Win-now*, *Rebuild*, *Fair*, and *Fleece* (lopsided but plausible).
-7. **Explain.** Each suggestion includes a plain-English rationale, for example:
-   "You're 3 deep at WR, they start a WR3-level TE; this upgrades your TE by X
-   and their WR2 by Y."
+| Source | What it is | Access | How it becomes a value |
+|---|---|---|---|
+| **FantasyCalc** (current) | Market value from real trades | Browser, CORS `*` | Used as-is |
+| **Sleeper projections** | Sleeper's weekly projected stats and points. `GET api.sleeper.app/projections/nfl/{season}/{week}?season_type=regular&position[]=…` (undocumented) | Browser, CORS `*` | Sum the remaining weeks and score them with **this league's** `scoring_settings` to get points over replacement at each position, then scale to FantasyCalc units |
+| **FantasyPros ECR**, republished daily by [DynastyProcess](https://github.com/dynastyprocess/data) (`db_fpecr_latest.csv`, with `db_playerids.csv` mapping IDs to `sleeper_id`) | Expert consensus rest-of-season rankings | GitHub raw files, not CORS-safe, so the daily job caches them in `/data/` | Map rank to value with a fitted curve (rank → FantasyCalc value at that rank) |
 
-## 7. Use cases
+How the sources combine:
+- **Blended value** = a weighted average of the normalized sources. This becomes
+  the engine's `value`. Weights are adjustable in the UI.
+- **Disagreement** = projection value or expert value ÷ market value. Players far
+  above 1 are **buy-low** targets; players far below 1 are **sell-high**
+  candidates. The engine can then favor trades that receive buy-low players and
+  send sell-high ones, and the rationale can say why ("Projections like him 30%
+  more than the trade market").
+
+Check each source's terms before the public launch. All of these are fine for
+personal use; the DynastyProcess data repackages FantasyPros rankings.
+
+## 5. Trade engine
+
+### Team model
+1. **Optimal lineup:** greedily fill the strict slots (QB, RB, WR, TE) with the
+   best available players, then the flex slots (FLEX, WRRB_FLEX, REC_FLEX,
+   SUPER_FLEX) from what remains. K, DEF, and IDP slots are ignored.
+2. **Team strength** = Σ starter value + a small weight (about 0.15) × the best
+   bench player at each position. The bench term rewards bye-week and injury
+   depth.
+3. **Needs and surplus by position:** compare each starting slot to the league
+   median at that slot. A slot well below the median is a **need**. A bench
+   player who would start on a median team is **surplus**.
+
+### Candidate generation
+- Only pair teams that complement each other: my surplus covers their need, or
+  the reverse.
+- Package shapes: 1-for-1, 2-for-1, and 1-for-2. Add 2-for-2 if the results stay fast.
+- Prune to reasonable players: skip value-0 players, and only consider receiving
+  players who would start for me.
+- Roster size: the side receiving more players drops its lowest-value bench player.
+
+### Scoring
+- `myGain` = Δ my team strength.
+- `theirGain` = Δ their team strength.
+- `valueBalance` = the raw FantasyCalc value each side receives versus gives,
+  with a consolidation premium for the side getting the best player in uneven
+  packages (FantasyCalc's calculator does the same).
+- Keep the trade only if `myGain > 0` and the other team plausibly accepts:
+  `theirGain ≥ 0` or the value balance is in their favor.
+- Rank by `myGain + λ·theirGain`. Presets:
+  - **Fair:** λ = 1. Win-win trades.
+  - **Balanced:** λ = 0.5.
+  - **Aggressive:** λ = 0.1, with a value floor so offers aren't insulting.
+
+### Explanation
+Each idea carries a short rationale built from the needs and surplus data, for
+example: *"You start a below-median TE and have a WR surplus; they're thin at WR.
++820 to your lineup, +310 to theirs."*
+
+## 6. Use cases
 
 ### MVP
-- **UC1 — Find my team:** enter a Sleeper username, pick a league from the
-  current season, and pick my team (default: the user's own roster).
-- **UC2 — Team overview:** see my roster with values, strengths and weaknesses
-  by position, and a league rank.
-- **UC3 — League landscape:** see every team's profile (needs, surplus,
-  contender or rebuilder) in one table.
-- **UC4 — Trade suggestions:** a ranked list of trade ideas with both sides'
-  gains and a rationale.
-- **UC5 — Trade evaluator:** build a custom trade manually and see its value
-  and impact for both teams.
+- **UC1 — Find my team:** enter a username, pick a redraft league, and pick a
+  team (defaults to the user's own).
+- **UC2 — Team overview:** roster with values, optimal lineup, and needs and
+  surplus by position compared with the league.
+- **UC3 — League landscape:** every team's strength and positional grades in one table.
+- **UC4 — Trade ideas:** a ranked list with both sides' gains and a rationale.
+  The strategy preset can be changed.
+- **UC5 — Trade evaluator:** pick players from each side and see the value
+  balance and lineup impact.
 
 ### Next
-- **UC6 — Target a player:** "How do I get Player X?" generates offers to that
-  player's owner.
-- **UC7 — Shop a player:** "Who wants Player Y?" lists the best returns across
-  the league.
-- **UC8 — Strategy presets and filters:** win-now or rebuild, positions to
-  include or exclude, untouchable players, maximum players per side.
-- **UC9 — Dynasty picks** included in packages.
+- **UC6 — Target a player:** offers to get a specific player.
+- **UC7 — Shop a player:** the best returns across the league for one of my players.
+- **UC8 — Filters:** untouchable players, positions to include or exclude,
+  maximum players per side.
+- **UC9 — Shareable links:** the query string encodes league, team, and trade.
 
 ### Later
-- **UC10 — Manager tendencies:** use trade history to favor partners who
+- **UC10 — Manager tendencies:** use trade history to favor managers who
   actually trade.
-- **UC11 — Shareable links:** a URL encodes league, team, and trade (no
-  accounts needed).
-- **UC12 — Buy-low / sell-high:** signals from trending data and value movement.
-- **UC13 — Own valuation model:** projections plus VORP, blended with
-  market values.
+- **UC11 — Bye weeks and schedule:** weight upcoming bye weeks for contenders.
+- **UC12 — Dynasty and keeper support:** add picks and age.
 
-### Non-goals (for now)
-- User accounts or login (Sleeper usernames are public; nothing to secure).
-- Executing trades in Sleeper (the API is read-only).
-- Platforms other than Sleeper. The data layer is still behind an adapter so
-  ESPN or Yahoo could be added later.
+### Non-goals
+Accounts, executing trades (Sleeper's API is read-only), and platforms other
+than Sleeper.
 
-## 8. Proposed repo layout
+## 7. Repo layout
 
 ```
-/app            React SPA (Vite + TS)
-/packages/engine Trade engine: pure TS + Vitest
-/packages/sleeper Typed Sleeper API client + caching
-/jobs/data-sync Daily job: players.json + values.json
-/infra          AWS CDK stack (S3, CloudFront, ACM, Route 53, Lambda)
-/docs           Design docs
+app/                 Vite + React + TS
+  src/sleeper/       Typed Sleeper client
+  src/values/        ValueProvider + FantasyCalc
+  src/engine/        Lineup, team profiles, trade generation, scoring (+ tests)
+  src/ui/            Components
+  src/load.ts        Sleeper + values + players.json → engine League
+  public/data/       players.json (generated, git-ignored)
+  scripts/           players.mjs (builds players.json), ideas.ts (CLI), fixture.ts (saves test fixtures)
+infra/               CDK: S3 + CloudFront + players.json Lambda
+docs/                This file
 ```
 
-## 9. Plan of action
+## 8. Plan of action
 
 | Phase | Deliverable | Done when |
 |---|---|---|
-| **0. Setup** | Repo, GitHub remote, monorepo skeleton, lint/test/CI | CI is green on an empty app |
-| **1. Data layer** | Typed Sleeper client; local script that dumps a real league to JSON fixtures | A real league's rosters print with player names |
-| **2. Values** | `ValueProvider` interface + FantasyCalc implementation, cached | Every rostered player has a value for the league's format |
-| **3. Engine v1** | Team profiles, partner matching, 1-for-1 and 2-for-1 generation and scoring, rationale; tested on fixtures | Sensible suggestions for your own league in a CLI |
-| **4. UI MVP** | UC1–UC5 in the SPA | Usable locally end to end |
-| **5. Deploy** | CDK stack, daily data job, GitHub Actions deploy, custom domain | Live at your domain or subdomain |
-| **6. Iterate** | UC6–UC13 by priority | — |
-
-The CLI-first approach in Phase 3 lets us tune trade quality on real leagues
-before any UI work.
-
-## 10. Open questions
-
-1. Which league formats matter most: dynasty, redraft, or keeper? This sets the
-   value source and whether picks are needed for the MVP.
-2. Will it live at a subdomain (`trades.yoursite.com`) or a sub-path
-   (`yoursite.com/trades`)? Where is the current site hosted, and is DNS in
-   Route 53?
-3. Is FantasyCalc acceptable as the starting value source?
-4. Is the CDK + GitHub Actions + OIDC deploy approach acceptable, or do you
-   prefer Terraform or manual deploys?
+| 0. Setup ✅ | Repo, GitHub, design | Pushed |
+| 1. Data ✅ | Sleeper client, FantasyCalc provider, players.json script, fixtures from a real league | Real league rosters print with names and values |
+| 2. Engine v1 ✅ | Lineup, profiles, 1-for-1 and 2-for-1 generation, scoring, rationale; tests; CLI | Sensible ideas for both test leagues in the terminal |
+| 3. UI MVP | UC1–UC5 | Usable locally (`npm run dev`) |
+| 3.5. More value sources | Sleeper projections → league-scored value; FantasyPros ECR via DynastyProcess; blended value plus buy-low/sell-high signal | Ideas cite disagreement between sources |
+| 4. Deploy | CDK stack + players Lambda; then the shampoe.com repo adds `trades` to `apps` plus `site/trades/` pages | Live at shampoe.com/trades/ |
+| 5. Iterate | UC6+ | — |
