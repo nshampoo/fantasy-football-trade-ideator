@@ -7,4 +7,4 @@ cdk.out/
 .DS_Store
 *.log
 coverage/
-public/data/
+app/public/data/
