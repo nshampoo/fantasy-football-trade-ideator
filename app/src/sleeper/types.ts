@@ -46,6 +46,8 @@ export interface PlayerInfo {
   t: string | null;
   /** injury status, e.g. "Questionable", "IR" */
   i?: string;
+  /** ESPN player ID, for linking out */
+  e?: string;
 }
 
 export type PlayerDb = Record<string, PlayerInfo>;

@@ -9,7 +9,13 @@ export function trimPlayers(all) {
     // Retired and long-gone players linger in the DB; keep anyone with a team or a recent season.
     if (!p.team && !p.active) continue;
     const name = p.full_name || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
-    out[id] = { n: name, p: p.position, t: p.team ?? null, ...(p.injury_status ? { i: p.injury_status } : {}) };
+    out[id] = {
+      n: name,
+      p: p.position,
+      t: p.team ?? null,
+      ...(p.injury_status ? { i: p.injury_status } : {}),
+      ...(p.espn_id ? { e: String(p.espn_id) } : {}),
+    };
   }
   return out;
 }

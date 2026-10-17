@@ -25,13 +25,16 @@ export function buildLeague(raw: RawLeague, values: Map<string, PlayerValue>, pl
   const usersById = new Map(raw.users.map((u) => [u.user_id, u]));
   const player = (id: string): Player => {
     const info = players[id];
+    const v = values.get(id);
     return {
       id,
       name: info?.n ?? id,
       pos: info?.p ?? '?',
       team: info?.t ?? null,
       injury: info?.i,
-      value: values.get(id)?.value ?? 0,
+      value: v?.value ?? 0,
+      fantasyCalcId: v?.fantasyCalcId,
+      espnId: v?.espnId ?? info?.e,
     };
   };
   const teams = raw.rosters.map((r): Team => {

@@ -10,6 +10,8 @@ export interface Player {
   injury?: string;
   /** Rest-of-season trade value (FantasyCalc units); 0 for unlisted players. */
   value: number;
+  fantasyCalcId?: number;
+  espnId?: string;
 }
 
 export interface Team {

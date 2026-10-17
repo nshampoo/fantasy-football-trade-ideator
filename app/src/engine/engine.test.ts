@@ -116,3 +116,22 @@ describe.each([['flaggers', flaggers], ['rizzler', rizzler]])('real league: %s',
     }
   });
 });
+
+describe('playerLinks', () => {
+  it('builds FantasyCalc, ESPN, FantasyPros, and Sleeper links', async () => {
+    const { playerLinks } = await import('../links');
+    const links = playerLinks({ id: '7564', name: "Ja'Marr Chase", pos: 'WR', team: 'CIN', value: 8000, fantasyCalcId: 6936, espnId: '4362628' });
+    expect(links.map((l) => l.url)).toEqual([
+      'https://fantasycalc.com/players/jamarr-chase-6936',
+      'https://www.espn.com/nfl/player/_/id/4362628',
+      'https://www.fantasypros.com/nfl/players/jamarr-chase.php',
+      'https://sleeper.com/players/nfl/7564',
+    ]);
+  });
+
+  it('real-league players get a FantasyCalc link when valued', () => {
+    const league = buildLeague(rizzler as unknown as RawLeague, parseFantasyCalc(rizzler.fantasyCalc as never), rizzler.players);
+    const valued = league.teams.flatMap((t) => t.players).filter((x) => x.value > 0);
+    expect(valued.every((x) => x.fantasyCalcId)).toBe(true);
+  });
+});

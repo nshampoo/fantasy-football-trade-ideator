@@ -1,7 +1,7 @@
 import type { LeagueFormat, PlayerValue, ValueProvider } from './types';
 
 interface FantasyCalcEntry {
-  player: { sleeperId: string | null; name: string; position: string };
+  player: { id: number; sleeperId: string | null; espnId: string | null; name: string; position: string };
   value: number;
   positionRank: number;
   trend30Day: number;
@@ -31,6 +31,8 @@ export function parseFantasyCalc(entries: FantasyCalcEntry[]): Map<string, Playe
       tier: e.maybeTier ?? undefined,
       positionRank: e.positionRank,
       trend30Day: e.trend30Day,
+      fantasyCalcId: e.player.id,
+      espnId: e.player.espnId ?? undefined,
     });
   }
   return values;

@@ -12,6 +12,9 @@ export interface PlayerValue {
   tier?: number;
   positionRank?: number;
   trend30Day?: number;
+  /** IDs for linking out to player pages. */
+  fantasyCalcId?: number;
+  espnId?: string;
 }
 
 /** A source of rest-of-season trade values, keyed by Sleeper player ID. */

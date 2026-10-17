@@ -41,6 +41,23 @@ Browser (the app)
   to fetch it at most once a day. A small scheduled Lambda (daily, or weekly during
   the season) trims it to the fields we use and writes it to the app bucket. Until
   that exists, `npm run players` builds the same file locally.
+- **players.json schedule:** the job runs once a day at about 6 pm ET, after
+  Friday's final injury designations. The file is about 180 KB (about 45 KB
+  gzipped) with `Cache-Control: max-age=3600`. Being up to a day old is fine:
+  values come live from FantasyCalc, which also carries name, position, and team
+  for every valued player. players.json only fills in unvalued players, injury
+  tags, and ESPN IDs. The UI shows an "as of" time.
+- **Player deep links:** every player in a trade idea links to live pages for
+  news, injuries, and value history. These cover anything newer than the daily
+  file.
+  - FantasyCalc: `fantasycalc.com/players/{slug}-{fcId}`
+  - ESPN: `espn.com/nfl/player/_/id/{espnId}`
+  - FantasyPros: `fantasypros.com/nfl/players/{slug}.php`. The slug is a best
+    guess and right for about 85% of players; misses land on FantasyPros
+    search. It becomes exact once DynastyProcess IDs are cached.
+  - Sleeper: `sleeper.com/players/nfl/{id}`
+  - Once Sleeper projections are in (Phase 3.5), they also bring near-live
+    injury status and team for projected players.
 - **Relative paths everywhere:** the app is served under `/trades/app/` with the
   prefix stripped, so the Vite `base` is `./`. The app has no client-side routes;
   state lives in the query string.
