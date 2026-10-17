@@ -52,7 +52,16 @@ export function buildLeague(raw: RawLeague, values: Map<string, PlayerValue>, pl
       pointsFor: (r.settings.fpts ?? 0) + (r.settings.fpts_decimal ?? 0) / 100,
     };
   });
-  return { id: raw.league.league_id, name: raw.league.name, season: raw.league.season, slots: parseSlots(raw.league.roster_positions), teams };
+  const f = leagueFormat(raw.league);
+  const ppr = f.ppr >= 0.75 ? 'PPR' : f.ppr >= 0.25 ? 'Half PPR' : 'Standard';
+  return {
+    id: raw.league.league_id,
+    name: raw.league.name,
+    season: raw.league.season,
+    format: `${f.numTeams} teams · ${ppr}${f.numQbs === 2 ? ' · Superflex' : ''}`,
+    slots: parseSlots(raw.league.roster_positions),
+    teams,
+  };
 }
 
 export async function loadLeague(leagueId: string, provider: ValueProvider, players: PlayerDb): Promise<League> {

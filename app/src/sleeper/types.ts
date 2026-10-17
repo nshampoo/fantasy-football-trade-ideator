@@ -2,6 +2,8 @@
 
 export interface NflState {
   season: string;
+  /** The season leagues are created under; differs from `season` in the offseason. */
+  league_season: string;
   week: number;
   season_type: string;
 }

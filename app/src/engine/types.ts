@@ -37,6 +37,8 @@ export interface League {
   id: string;
   name: string;
   season: string;
+  /** Scoring summary for display, e.g. "10 teams · PPR". */
+  format?: string;
   slots: Slot[];
   teams: Team[];
 }
